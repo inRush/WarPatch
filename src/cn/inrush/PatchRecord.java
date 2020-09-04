@@ -20,19 +20,21 @@ public class PatchRecord {
         /**
          * 新增
          */
-        ADD("a"),
+        ADD("a", "新增"),
         /**
          * 修改
          */
-        MODIFY("m"),
+        MODIFY("m", "修改"),
         /**
          * 删除
          */
-        DELETE("d");
+        DELETE("d", "删除");
         private String code;
+        private String description;
 
-        private Action(String code) {
+        private Action(String code, String description) {
             this.code = code;
+            this.description = description;
         }
 
         public static Action fromCode(String code) {
@@ -46,6 +48,10 @@ public class PatchRecord {
                 default:
                     return null;
             }
+        }
+
+        public String getDescription() {
+            return description;
         }
     }
 

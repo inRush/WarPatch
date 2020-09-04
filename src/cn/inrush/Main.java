@@ -3,6 +3,7 @@ package cn.inrush;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.lang.Assert;
+import cn.hutool.core.lang.Console;
 import cn.hutool.core.util.ClassUtil;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
@@ -154,17 +155,97 @@ public class Main {
         return patchDir.getAbsolutePath();
     }
 
-    private static void patch(String patchFile, String target) {
-        File patch = new File(FileUtil.getAbsolutePath(patchFile));
+    private static void rollBack(List<PatchRecord> doRecords, String backupDirPath, String targetDirPath) {
+        try {
+            List<PatchRecord> failRecords = new ArrayList<>();
+            for (PatchRecord record :
+                    doRecords) {
+                Console.log("[回滚]: {}", record.getAction().getDescription(), record.getFile());
+                String sourceResourcePath = FileUtil.getAbsolutePath(backupDirPath + "/" + record.getFile());
+                String targetResourcePath = FileUtil.getAbsolutePath(targetDirPath + "/" + record.getFile());
+                boolean succeed = false;
+                switch (record.getAction()) {
+                    case ADD:
+                        succeed = FileUtil.del(targetResourcePath);
+                        break;
+                    case MODIFY:
+                    case DELETE:
+                        File file = FileUtil.copy(sourceResourcePath, targetResourcePath, true);
+                        succeed = file.exists();
+                        break;
+                }
+                if (!succeed) {
+                    failRecords.add(record);
+                }
+            }
+            Console.log("=====================================================================");
+            for (PatchRecord record :
+                    failRecords) {
+                Console.log("[回滚]: {} -> 失败,请手动复制文件进行恢复", record.getFile());
+            }
+            Console.log("=====================================================================");
+        } catch (Exception e) {
+            e.printStackTrace();
+            Console.log("回滚失败,尝试全量回滚或手动操作恢复!");
+        }
+    }
+
+    private static boolean patch(String patchFile, String target) {
+        File patch;
+        if (!StrUtil.isBlank(patchFile)) {
+            patch = new File(FileUtil.getAbsolutePath(patchFile));
+        } else {
+            patch = new File(FileUtil.getAbsolutePath("patch"));
+        }
+        Console.log("确认将 {} 内的更新补丁更新到 {}? Y(是) N(否)", patch.getAbsolutePath(), target);
+        String input = Console.input();
+        if (!"Y".equals(input)) {
+            return false;
+        }
         File patchDir = FileUtil.getParent(patch, 1);
         File resourceDir = new File(FileUtil.getAbsolutePath(patchDir.getAbsolutePath() + "/resource"));
         Assert.isTrue(resourceDir.exists(), "patch 文件对应的resource文件夹不存在,请选择程序生成的patch文件夹内的patch文件且不要修改目录结构");
         List<PatchRecord> records = PatchRecord.readRecords(patch);
-        // backup target
-
-//        FileUtil.copy()
-
-
+        // backup target directory
+        Console.log("[开始备份目标文件夹]: {}", target);
+        File backupFile = FileUtil.copy(target, patchDir.getAbsolutePath(), true);
+        Console.log("[备份完成]: {}", backupFile.getAbsolutePath());
+        Console.log("[开始打补丁]", backupFile.getAbsolutePath());
+        List<PatchRecord> failRecords = new ArrayList<>();
+        for (PatchRecord record : records) {
+            String sourceResourcePath = FileUtil.getAbsolutePath(resourceDir.getAbsolutePath() + "/" + record.getFile());
+            String targetResourcePath = FileUtil.getAbsolutePath(target + "/" + record.getFile());
+            boolean succeed = false;
+            try {
+                switch (record.getAction()) {
+                    case ADD:
+                    case MODIFY:
+                        File file = FileUtil.copy(sourceResourcePath, targetResourcePath, true);
+                        succeed = file.exists();
+                        Console.log("[{}]: {} -> {}", record.getAction().getDescription(), sourceResourcePath, targetResourcePath);
+                        break;
+                    case DELETE:
+                        succeed = FileUtil.del(targetResourcePath);
+                        Console.log("[{}]: {}", record.getAction().getDescription(), targetResourcePath);
+                        break;
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            if (!succeed) {
+                failRecords.add(record);
+                break;
+            }
+        }
+        if (!failRecords.isEmpty()) {
+            Console.log("=====================================================================");
+            for (PatchRecord record :
+                    failRecords) {
+                Console.log("[{}]: {} -> 失败,请手动复制文件进行更新", record.getAction().getDescription(), record.getFile());
+            }
+            Console.log("=====================================================================");
+        }
+        return true;
     }
 
     public static void main(String[] args) throws IOException {
@@ -176,15 +257,19 @@ public class Main {
         } else if (!StrUtil.isBlank(command.getWarPath()) && !StrUtil.isBlank(command.getPatchFile())) {
             // -war and -patch
             String path = createNewPatch(command.getWarPath(), command.getPatchFile());
-            System.out.println(StrUtil.format("创建新的patch完成: {}", path));
+            Console.log(StrUtil.format("创建新的patch完成: {}", path));
         } else if (!StrUtil.isBlank(command.getPatchFile()) && !StrUtil.isBlank(command.getTarget())) {
             // -patch and -target
-
+            boolean completable = patch(command.getPatchFile(), command.getTarget());
+            Console.log("patch{}", completable ? "完成" : "取消");
+        } else if (!StrUtil.isBlank(command.getTarget())) {
+            // -target
+            boolean completable = patch(null, command.getTarget());
+            Console.log("patch{}", completable ? "完成" : "取消");
         } else if (!StrUtil.isBlank(command.getWarPath())) {
             // -war
             String path = createNewPatch(command.getWarPath(), null);
-            System.out.println(StrUtil.format("创建新的patch完成: {}", path));
+            Console.log(StrUtil.format("创建新的patch完成: {}", path));
         }
-
     }
 }
