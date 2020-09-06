@@ -10,6 +10,8 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.crypto.digest.MD5;
 import com.beust.jcommander.JCommander;
 
+import javax.swing.*;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -17,16 +19,18 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
+import java.util.prefs.Preferences;
 
 public class Main {
     /**
      * 当前上下文路径
      */
     private static final String CURRENT_CONTEXT_PATH;
+    private static final String CURRENT_JAR_PATH;
 
     static {
-        String jarPath = ClassUtil.getLocationPath(Main.class);
-        CURRENT_CONTEXT_PATH = FileUtil.getParent(jarPath, 1);
+        CURRENT_JAR_PATH = ClassUtil.getLocationPath(Main.class);
+        CURRENT_CONTEXT_PATH = FileUtil.getParent(CURRENT_JAR_PATH, 1);
     }
 
     /**
@@ -150,7 +154,8 @@ public class Main {
             InputStream is = war.getInputStream(war.getJarEntry(record.getFile()));
             FileUtil.writeFromStream(is, patchResourceFilePath);
         }
-
+        FileUtil.copy(CURRENT_JAR_PATH, patchDir.getAbsolutePath(), true);
+        FileUtil.writeString("java -jar WarPatch.jar\npause", FileUtil.getAbsolutePath(patchDir.getAbsolutePath() + "/patch.bat"), StandardCharsets.UTF_8);
         war.close();
         return patchDir.getAbsolutePath();
     }
@@ -248,6 +253,37 @@ public class Main {
         return true;
     }
 
+    private static String selectTargetDir() {
+        JFileChooser fc = null;
+        Preferences pref = Preferences.userRoot().node("/cn/inrush/warpatch");
+        String lastPath = pref.get("last_path", "");
+        if (!lastPath.equals("")) {
+            fc = new JFileChooser(lastPath);
+        } else {
+            fc = new JFileChooser();
+        }
+        fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        //设置一个文件筛选器
+//        fc.setFileFilter(filter);
+        //设置不允许多选
+        fc.setMultiSelectionEnabled(false);
+        /*使用showOpenDialog()方法，显示出打开选择文件的窗口，当选择了某个文件后，或者关闭此窗口那么都会返回一个
+          整型数值，如果返回的是0，代表已经选择了某个文件。如果返回1代表选择了取消按钮或者直接关闭了窗口*/
+        int result = fc.showOpenDialog(null);
+
+
+        //JFileChooser.APPROVE_OPTION是个整型常量，代表0。就是说当返回0的值我们才执行相关操作，否则什么也不做。
+        if (result == JFileChooser.APPROVE_OPTION) {
+            //获取当前选择的文件路径
+            File file = fc.getSelectedFile();
+            String path = file.getPath();
+            pref.put("last_path", FileUtil.getParent(path, 1));
+            //返回文件路径
+            return path;
+        }
+        return null;
+    }
+
     public static void main(String[] args) throws IOException {
         Command command = new Command();
         JCommander.newBuilder().addObject(command).build().parse(args);
@@ -270,6 +306,20 @@ public class Main {
             // -war
             String path = createNewPatch(command.getWarPath(), null);
             Console.log(StrUtil.format("创建新的patch完成: {}", path));
+        } else if (!StrUtil.isBlank(command.getPatchFile())) {
+            // -patch
+            String targetDirPath = selectTargetDir();
+            if (targetDirPath != null) {
+                boolean completable = patch(command.getPatchFile(), targetDirPath);
+                Console.log("patch{}", completable ? "完成" : "取消");
+            }
+        } else {
+            String targetDirPath = selectTargetDir();
+            if (targetDirPath != null) {
+                boolean completable = patch(null, targetDirPath);
+                Console.log("patch{}", completable ? "完成" : "取消");
+            }
         }
+
     }
 }
